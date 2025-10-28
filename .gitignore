@@ -1,0 +1,22 @@
+logs/
+BindingDB_All_202211.tsv
+BindingDB_All_202510.tsv
+model.pt
+bindingdb_data.pickle
+
+# (권장) 일반 파이썬/캐시 제외
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.log
+*.tmp
+*.cache
+*.bak
+*.swp
+venv/
+.env/
+.ipynb_checkpoints/
+runs/
+.DS_Store
+Thumbs.db
