@@ -31,9 +31,9 @@ def set_seed(seed):
     # torch.backends.cudnn.benchmark = False
 
 # 시드 설정: 논문 재현을 위해 고정된 시드 값 사용
-# FIXED_SEED = 42 # 데이터 분할에 사용된 시드와 동일하게 사용
-# FIXED_SEED = 100 # 두번째
-FIXED_SEED = 200 # 세번째
+FIXED_SEED = 42 # 데이터 분할에 사용된 시드와 동일하게 사용
+# # FIXED_SEED = 100 # 두번째
+# FIXED_SEED = 200 # 세번째
 set_seed(FIXED_SEED)
 
 
@@ -80,14 +80,38 @@ context_encoder = MLPEncoder(config['layer_width'], config).cuda()
 query_encoder = MLPEncoder(config['layer_width'], config).cuda()
 predictor = Predictor(config['d_model'] * 2, config).cuda()
 
+
+# ----------------------------
+# Self-Attention 적용 수정 - NEW!!
+# ----------------------------
+# ★ 추가: 컨텍스트용 Self-Attention 블록
+context_self_attn = ContextSelfAttention(
+    d_model=config['d_model'],
+    n_heads=config['n_heads'],
+    n_layers=config['n_layers'],
+    dropout=config['embed_dropout'],
+).cuda()
+
+
 # ----------------------------
 # 옵티마이저 & 스케줄러
+# ----------------------------
+# optimizer = optim.RAdam(
+#     list(context_encoder.parameters()) +
+#     list(query_encoder.parameters()) +
+#     list(predictor.parameters()), lr=config['lr']
+# )
+# ----------------------------
+# Self-Attention 적용 수정 - NEW!!
 # ----------------------------
 optimizer = optim.RAdam(
     list(context_encoder.parameters()) +
     list(query_encoder.parameters()) +
-    list(predictor.parameters()), lr=config['lr']
+    list(predictor.parameters()) +
+    list(context_self_attn.parameters()),  # ★ 추가
+    lr=config['lr']
 )
+
 
 warmup_scheduler = optim.lr_scheduler.LinearLR(optimizer, start_factor=0.0001, end_factor=1.0, total_iters=config['warmup_steps'])
 annealing_scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=config['total_epochs'])
@@ -96,7 +120,7 @@ scheduler = optim.lr_scheduler.SequentialLR(optimizer, [warmup_scheduler, anneal
 # ----------------------------
 # TensorBoard
 # ----------------------------
-writer = SummaryWriter('logs/' + config['run_name'])
+writer = SummaryWriter(f'logs/FS_CAP_SelfAttention/{config["run_name"]}')
 
 # ----------------------------
 # 학습 루프
@@ -114,15 +138,33 @@ while True:
         # ----------------------------
         # 컨텍스트 인코딩
         # ----------------------------
-        context = torch.zeros((len(config['context_ranges']), len(context_x), config['d_model']), device='cuda')
-        for j in range(len(config['context_ranges'])):
-            context[j] = context_encoder(context_x[:, j, :], context_y[:, j, :])
-        context = context.mean(0)
+        # context = torch.zeros((len(config['context_ranges']), len(context_x), config['d_model']), device='cuda')
+        # for j in range(len(config['context_ranges'])):
+        #     context[j] = context_encoder(context_x[:, j, :], context_y[:, j, :])
+        # context = context.mean(0)
+        # ----------------------------
+        # 컨텍스트 인코딩
+        # ----------------------------
+        # Self-Attention 적용 수정 - NEW!!
+        # ----------------------------
+        n_ctx = len(config['context_ranges'])
+        context = torch.zeros((n_ctx, len(context_x), config['d_model']), device='cuda')        
+        for j in range(n_ctx):
+            # context_encoder는 각 (x_j, y_j)를 d_model 차원으로 인코딩한다고 가정
+            context[j] = context_encoder(context_x[:, j, :], context_y[:, j, :])        
+        # 현재: (n_ctx, batch, d_model)  → Self-Attention을 위해 (batch, n_ctx, d_model)로 변환
+        context = context.permute(1, 0, 2)  # (batch, n_ctx, d_model)       
+        # ★ Self-Attention 적용 (ANP의 self-attention block에 해당)
+        context = context_self_attn(context)  # (batch, n_ctx, d_model)     
+        # ★ 컨텍스트 집합을 다시 하나의 벡터로 집계 (순서 불변성 유지)
+        context = context.mean(dim=1)  # (batch, d_model)
+
 
         # ----------------------------
         # 쿼리 인코딩 & 예측
         # ----------------------------
         query = query_encoder(query_x)
+        
         x = torch.concat((context, query), dim=1)
         loss = torch.mean((predictor(x) - query_y) ** 2)
         total_loss += loss.item()
@@ -143,6 +185,7 @@ while True:
             context_encoder.eval()
             query_encoder.eval()
             predictor.eval()
+            context_self_attn.eval()
             with torch.no_grad():
                 val_loss = 0
                 target_to_pred = {}
@@ -155,10 +198,21 @@ while True:
                     query_x = query_x.to(dtype=torch.float32, device='cuda')
                     query_y = query_y.to(dtype=torch.float32, device='cuda').unsqueeze(-1)
 
-                    context = torch.zeros((len(config['context_ranges']), len(context_x), config['d_model']), device='cuda')
-                    for k in range(len(config['context_ranges'])):
+                    # context = torch.zeros((len(config['context_ranges']), len(context_x), config['d_model']), device='cuda')
+                    # for k in range(len(config['context_ranges'])):
+                    #     context[k] = context_encoder(context_x[:, k, :], context_y[:, k, :])
+                    # context = context.mean(0)
+                    # ----------------------------
+                    # Self-Attention 적용 수정 - NEW!!
+                    # ----------------------------
+                    n_ctx = len(config['context_ranges'])
+                    context = torch.zeros((n_ctx, len(context_x), config['d_model']), device='cuda')
+                    for k in range(n_ctx):
                         context[k] = context_encoder(context_x[:, k, :], context_y[:, k, :])
-                    context = context.mean(0)
+                    context = context.permute(1, 0, 2)           # (batch, n_ctx, d_model)
+                    context = context_self_attn(context)         # (batch, n_ctx, d_model)
+                    context = context.mean(dim=1)   
+
 
                     query = query_encoder(query_x)
                     x = torch.concat((context, query), dim=1)
@@ -194,7 +248,7 @@ while True:
             context_encoder.train()
             query_encoder.train()
             predictor.train()
-
+            context_self_attn.train()
         # ----------------------------
         # 옵티마이저 업데이트
         # ----------------------------
@@ -209,7 +263,12 @@ while True:
 
             if epoch == config['total_epochs']:
                 torch.save(
-                    (context_encoder.state_dict(), query_encoder.state_dict(), predictor.state_dict()),
+                    (
+                        context_encoder.state_dict(), 
+                        query_encoder.state_dict(), 
+                        predictor.state_dict(),
+                        context_self_attn.state_dict(),
+                    ),
                     f'model.pt'
                 )
                 exit()

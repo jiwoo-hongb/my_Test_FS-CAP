@@ -2,6 +2,28 @@ from torch import nn
 import torch.nn.functional as F
 
 
+class ContextSelfAttention(nn.Module):
+    """
+    FS-CAP의 context set(r_i들)에 대해 ANP-style self-attention을 적용하는 블록.
+    입력:  (batch, n_ctx, d_model)
+    출력:  (batch, n_ctx, d_model)  (각 컨텍스트 벡터가 서로를 보고 업데이트됨)
+    """
+    def __init__(self, d_model, n_heads, n_layers=1, dropout=0.0):
+        super().__init__()
+        encoder_layer = nn.TransformerEncoderLayer(
+            d_model=d_model,
+            nhead=n_heads,
+            dim_feedforward=d_model * 2,
+            dropout=dropout,
+            batch_first=True,  # 입력을 (B, T, C) 형태로 받기 위함
+        )
+        self.encoder = nn.TransformerEncoder(encoder_layer, num_layers=n_layers)
+
+    def forward(self, x):
+        # x: (batch, n_ctx, d_model)
+        return self.encoder(x)
+
+
 class MLPEncoder(nn.Module):
     def __init__(self, in_dim, config):
         super().__init__()
