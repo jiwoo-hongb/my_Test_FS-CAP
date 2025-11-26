@@ -123,6 +123,7 @@ while True:
         # 쿼리 인코딩 & 예측
         # ----------------------------
         query = query_encoder(query_x)
+        
         x = torch.concat((context, query), dim=1)
         loss = torch.mean((predictor(x) - query_y) ** 2)
         total_loss += loss.item()

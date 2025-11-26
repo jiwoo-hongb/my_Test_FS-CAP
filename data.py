@@ -31,14 +31,34 @@ class FSCAPDataset(Dataset):
     def __len__(self):
         return len(self.x)
 
+    # def __getitem__(self, idx):
+    #     target = self.targets[idx]
+    #     context_idxs = []
+    #     for i in range(len(self.avail_idxs[target])):
+    #         if not self.avail_idxs[target][i]:
+    #             self.avail_idxs[target][i] = copy(self.target_to_idxs[target][i])
+    #             random.shuffle(self.avail_idxs[target][i])
+    #         context_idxs.append(self.avail_idxs[target][i].pop())
+    #     return self.x[context_idxs], self.y[context_idxs], self.x[idx], self.y[idx], target
+    # data.py 수정 제안
     def __getitem__(self, idx):
         target = self.targets[idx]
         context_idxs = []
         for i in range(len(self.avail_idxs[target])):
-            if not self.avail_idxs[target][i]:
-                self.avail_idxs[target][i] = copy(self.target_to_idxs[target][i])
-                random.shuffle(self.avail_idxs[target][i])
-            context_idxs.append(self.avail_idxs[target][i].pop())
+            # ... (리필 로직 생략) ...
+            
+            # [수정] 자기 자신(idx)이 뽑히면 다시 뽑기
+            cand = self.avail_idxs[target][i].pop()
+            while cand == idx:
+                # 뽑은 게 하필 정답(Query)이라면 버리고 다시 뽑거나
+                # 리스트가 비었다면 리필 후 다시 뽑기
+                if not self.avail_idxs[target][i]:
+                     self.avail_idxs[target][i] = copy(self.target_to_idxs[target][i])
+                     random.shuffle(self.avail_idxs[target][i])
+                cand = self.avail_idxs[target][i].pop()
+            
+            context_idxs.append(cand)
+            
         return self.x[context_idxs], self.y[context_idxs], self.x[idx], self.y[idx], target
 
 
