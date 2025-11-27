@@ -11,7 +11,7 @@ from rdkit.Chem.AllChem import GetMorganFingerprintAsBitVect
 # =========================================================
 # 💡 추가된 부분: 난수 시드 고정
 # =========================================================
-FIXED_SEED = 100
+FIXED_SEED = 42
 
 def featurize_mol(smiles):
     return np.array(GetMorganFingerprintAsBitVect(MolFromSmiles(smiles), 3))
